@@ -43,3 +43,22 @@ export interface N8NExecutionListResponse {
 export interface N8NErrorResponse {
   error: string;
 }
+
+/**
+ * Node information structure from GitHub
+ */
+export interface NodeInfo {
+  name: string;
+  displayName: string;
+  description: string;
+  documentationUrl?: string;
+  readmePath?: string;
+  readmeContent?: string;
+}
+
+/**
+ * Response for node listing
+ */
+export interface NodeListResponse {
+  nodes: NodeInfo[];
+}

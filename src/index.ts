@@ -10,6 +10,7 @@ import {
   ListResourceTemplatesRequestSchema 
 } from './sdk-schemas';
 import * as n8nApi from './services/n8nApi';
+import { marked } from 'marked';
 import { WorkflowBuilder } from './services/workflowBuilder';
 import { validateWorkflowSpec } from './utils/validation';
 
@@ -54,6 +55,12 @@ class N8NWorkflowServer {
             name: 'Execution Statistics',
             description: 'Summary statistics of workflow executions',
             mimeType: 'application/json'
+          },
+          {
+            uri: '/nodes',
+            name: 'n8n Nodes',
+            description: 'List of all available n8n nodes from GitHub',
+            mimeType: 'application/json'
           }
         ]
       };
@@ -86,6 +93,19 @@ class N8NWorkflowServer {
               {
                 name: 'id',
                 description: 'The ID of the execution',
+                required: true
+              }
+            ]
+          },
+          {
+            uriTemplate: '/nodes/{name}',
+            name: 'Node Details',
+            description: 'Details and documentation for a specific n8n node',
+            mimeType: 'application/json',
+            parameters: [
+              {
+                name: 'name',
+                description: 'The name of the node',
                 required: true
               }
             ]
@@ -171,6 +191,34 @@ class N8NWorkflowServer {
         }
       }
       
+      // Provide a list of all available n8n nodes
+      if (uri === '/nodes') {
+        try {
+          const nodesResponse = await n8nApi.listNodes();
+          return {
+            contents: [{
+              type: 'text',
+              text: JSON.stringify(nodesResponse, null, 2),
+              mimeType: 'application/json',
+              uri: '/nodes'
+            }]
+          };
+        } catch (error) {
+          console.error('Error fetching nodes list:', error);
+          return {
+            contents: [{
+              type: 'text',
+              text: JSON.stringify({
+                nodes: [],
+                error: 'Failed to retrieve nodes from GitHub'
+              }, null, 2),
+              mimeType: 'application/json',
+              uri: '/nodes'
+            }]
+          };
+        }
+      }
+      
       
       // Dynamic resource template matching
       const workflowMatch = uri.match(/^\/workflows\/(.+)$/);
@@ -210,6 +258,40 @@ class N8NWorkflowServer {
           };
         } catch (error) {
           throw new McpError(ErrorCode.InvalidParams, `Execution with ID ${id} not found`);
+        }
+      }
+      
+      // Get details for a specific node
+      const nodeMatch = uri.match(/^\/nodes\/(.+)$/);
+      if (nodeMatch) {
+        const nodeName = nodeMatch[1];
+        
+        try {
+          // Get detailed node information including readme
+          const nodeInfo = await n8nApi.getNodeInfo(nodeName);
+          
+          // If readme content exists, convert markdown to HTML for better display
+          if (nodeInfo.readmeContent) {
+            try {
+              // Use marked.parse synchronously 
+              nodeInfo.readmeContent = marked.parse(nodeInfo.readmeContent) as string;
+            } catch (error) {
+              console.warn(`Error converting markdown to HTML for ${nodeName}:`, error);
+              // Keep original markdown if conversion fails
+            }
+          }
+          
+          return {
+            contents: [{
+              type: 'text',
+              text: JSON.stringify(nodeInfo, null, 2),
+              mimeType: 'application/json',
+              uri: uri
+            }]
+          };
+        } catch (error) {
+          console.error(`Error fetching node info for ${nodeName}:`, error);
+          throw new McpError(ErrorCode.InvalidParams, `Node with name ${nodeName} not found or could not be fetched`);
         }
       }
       
@@ -319,6 +401,29 @@ class N8NWorkflowServer {
               type: 'object',
               properties: { id: { type: 'string' } },
               required: ['id']
+            }
+          },
+          
+          // Node Tools
+          {
+            name: 'list_nodes',
+            enabled: true,
+            description: 'List all available n8n nodes from GitHub',
+            inputSchema: {
+              type: 'object',
+              properties: {}
+            }
+          },
+          {
+            name: 'get_node_info',
+            enabled: true,
+            description: 'Get detailed information and documentation for a specific n8n node',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                name: { type: 'string' }
+              },
+              required: ['name']
             }
           },
           
@@ -517,6 +622,41 @@ class N8NWorkflowServer {
               content: [{ 
                 type: 'text', 
                 text: JSON.stringify(deletedExecution, null, 2) 
+              }]
+            };
+            
+          // Node Tools
+          case 'list_nodes':
+            const nodes = await n8nApi.listNodes();
+            return {
+              content: [{ 
+                type: 'text', 
+                text: JSON.stringify(nodes, null, 2) 
+              }]
+            };
+            
+          case 'get_node_info':
+            if (!args.name) {
+              throw new McpError(ErrorCode.InvalidParams, 'Node name is required');
+            }
+            
+            const nodeInfo = await n8nApi.getNodeInfo(args.name);
+            
+            // Convert markdown to HTML if readme content exists
+            if (nodeInfo.readmeContent) {
+              try {
+                // Use marked.parse synchronously
+                nodeInfo.readmeContent = marked.parse(nodeInfo.readmeContent) as string;
+              } catch (error) {
+                console.warn(`Error converting markdown to HTML for ${args.name}:`, error);
+                // Keep original markdown if conversion fails
+              }
+            }
+            
+            return {
+              content: [{ 
+                type: 'text', 
+                text: JSON.stringify(nodeInfo, null, 2) 
               }]
             };
             

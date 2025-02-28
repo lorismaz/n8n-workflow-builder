@@ -66,6 +66,7 @@ Server configuration is managed via the `cline_mcp_settings.json` file. Ensure t
 
 - `N8N_HOST`: Your n8n API host URL.
 - `N8N_API_KEY`: Your n8n API key.
+- `GITHUB_TOKEN` (Optional): A GitHub personal access token for higher rate limits when fetching node information.
 
 Example configuration in `cline_mcp_settings.json`:
 
@@ -76,7 +77,8 @@ Example configuration in `cline_mcp_settings.json`:
     "args": ["/root/n8n-workflow-builder/build/index.js"],
     "env": {
       "N8N_HOST": "https://n8n.io/api/v1/",
-      "N8N_API_KEY": "YOUR_N8N_API_KEY_HERE"
+      "N8N_API_KEY": "YOUR_N8N_API_KEY_HERE",
+      "GITHUB_TOKEN": "YOUR_GITHUB_TOKEN_HERE"
     },
     "disabled": false,
     "alwaysAllow": [
@@ -86,7 +88,9 @@ Example configuration in `cline_mcp_settings.json`:
       "activate_workflow",
       "deactivate_workflow",
       "get_workflow",
-      "delete_workflow"
+      "delete_workflow",
+      "list_nodes",
+      "get_node_info"
     ],
     "autoApprove": []
   }
@@ -108,6 +112,10 @@ The following tools are defined in the server and can be accessed through your M
 - **activate_workflow**: Activates a workflow by its ID.
 - **deactivate_workflow**: Deactivates a workflow by its ID.
 
+#### Node Information
+- **list_nodes**: Lists all available nodes from the n8n GitHub repository.
+- **get_node_info**: Retrieves detailed information and documentation for a specific node.
+
 #### Execution Management
 - **list_executions**: Lists all workflow executions with optional filters.
 - **get_execution**: Retrieves details of a specific execution by its ID.
@@ -120,10 +128,12 @@ The server also provides the following resources for more efficient context acce
 #### Static Resources
 - **/workflows**: List of all available workflows in the n8n instance
 - **/execution-stats**: Summary statistics about workflow executions
+- **/nodes**: List of all available n8n nodes from the GitHub repository
 
 #### Dynamic Resource Templates
 - **/workflows/{id}**: Detailed information about a specific workflow
 - **/executions/{id}**: Detailed information about a specific execution
+- **/nodes/{name}**: Detailed information and documentation for a specific node
 
 ## Troubleshooting
 
@@ -139,6 +149,8 @@ The server also provides the following resources for more efficient context acce
 - Reintroduction of npx support.
 - Additional tools and workflow features.
 - Further enhancements to deployment and scaling.
+- Cache for node information to reduce GitHub API calls.
+- More detailed node parameter documentation.
 
 ## License
 
