@@ -13,6 +13,7 @@ import * as n8nApi from './services/n8nApi';
 import { marked } from 'marked';
 import { WorkflowBuilder } from './services/workflowBuilder';
 import { validateWorkflowSpec } from './utils/validation';
+import { WorkflowSettings } from './types/workflow';
 
 console.log("ListToolsRequestSchema:", ListToolsRequestSchema);
 console.log("CallToolRequestSchema:", CallToolRequestSchema);
@@ -315,7 +316,7 @@ class N8NWorkflowServer {
           {
             name: 'create_workflow',
             enabled: true,
-            description: 'Create a new workflow in n8n',
+            description: 'Create a new workflow in n8n. Node types must include full prefix (e.g., "n8n-nodes-base.webhook", not just "webhook"). Do not include "tags" or "active" properties as they are read-only.',
             inputSchema: {
               type: 'object',
               properties: {
@@ -325,9 +326,17 @@ class N8NWorkflowServer {
                   items: {
                     type: 'object',
                     properties: {
-                      type: { type: 'string' },
+                      type: { 
+                        type: 'string',
+                        description: 'Full node type identifier including namespace (e.g., "n8n-nodes-base.webhook")'
+                      },
                       name: { type: 'string' },
-                      parameters: { type: 'object' }
+                      parameters: { type: 'object' },
+                      position: {
+                        type: 'array',
+                        items: { type: 'number' },
+                        description: 'Node position as [x, y] coordinates'
+                      }
                     },
                     required: ['type', 'name']
                   }
@@ -343,6 +352,13 @@ class N8NWorkflowServer {
                       targetInput: { type: 'number', default: 0 }
                     },
                     required: ['source', 'target']
+                  }
+                },
+                settings: {
+                  type: 'object',
+                  properties: {
+                    saveExecutionProgress: { type: 'boolean' },
+                    saveManualExecutions: { type: 'boolean' }
                   }
                 }
               },
@@ -498,19 +514,107 @@ class N8NWorkflowServer {
               args.name = 'New Workflow';
             }
             
-            const workflowSpec = validateWorkflowSpec({
-              name: args.name,
-              nodes: args.nodes as any[],
-              connections: args.connections || []
-            });
+            // Use WorkflowBuilder to create the workflow
+            const builder = new WorkflowBuilder();
             
-            const createdWorkflow = await n8nApi.createWorkflow(workflowSpec);
-            return {
-              content: [{ 
-                type: 'text', 
-                text: JSON.stringify(createdWorkflow, null, 2) 
-              }]
+            // Set workflow name
+            builder.setName(args.name);
+            
+            // Add settings if provided, merging with defaults
+            // Ensure executionOrder is set to 'v1' for proper UI rendering
+            const defaultSettings: WorkflowSettings = {
+              saveExecutionProgress: true,
+              saveManualExecutions: true,
+              saveDataErrorExecution: 'all',
+              saveDataSuccessExecution: 'none',
+              executionOrder: 'v1'
             };
+            
+            if (args.settings) {
+              // Keep executionOrder as v1 even if user tries to override it
+              const mergedSettings: WorkflowSettings = { 
+                ...defaultSettings, 
+                ...args.settings, 
+                executionOrder: 'v1' 
+              };
+              builder.setSettings(mergedSettings);
+            } else {
+              builder.setSettings(defaultSettings);
+            }
+            
+            // Add all nodes to the workflow
+            const nodesMap = new Map();
+            let lastX = 100;
+            const baseY = 240;
+            
+            for (const nodeData of args.nodes) {
+              // If position not specified, calculate it to ensure proper spacing
+              let position;
+              if (!nodeData.position) {
+                position = [lastX, baseY];
+                lastX += 200; // Ensure nodes have proper spacing
+              } else {
+                position = nodeData.position;
+              }
+              
+              const node = builder.addNode({
+                type: nodeData.type,
+                name: nodeData.name,
+                parameters: nodeData.parameters || {},
+                position: position,
+                typeVersion: nodeData.typeVersion || 1,
+                disabled: nodeData.disabled || false
+              });
+              nodesMap.set(nodeData.name, node);
+            }
+            
+            // Add connections between nodes
+            if (args.connections && Array.isArray(args.connections)) {
+              for (const conn of args.connections) {
+                const sourceNode = nodesMap.get(conn.source);
+                const targetNode = nodesMap.get(conn.target);
+                
+                if (sourceNode && targetNode) {
+                  builder.connectNodes(
+                    sourceNode.id, 
+                    targetNode.id,
+                    conn.sourceOutput || 0
+                  );
+                } else {
+                  console.warn(`Could not find nodes for connection: ${conn.source} -> ${conn.target}`);
+                }
+              }
+            }
+            
+            // Export the workflow specification
+            const workflowSpec = builder.exportWorkflow();
+            
+            console.log('Creating workflow with spec:', JSON.stringify(workflowSpec, null, 2));
+            
+            // Create the workflow in n8n
+            try {
+              const createdWorkflow = await n8nApi.createWorkflow(workflowSpec);
+              return {
+                content: [{ 
+                  type: 'text', 
+                  text: JSON.stringify(createdWorkflow, null, 2) 
+                }]
+              };
+            } catch (error) {
+              console.error('Error creating workflow:', error);
+              
+              // Log detailed error if available
+              if (error instanceof Error) {
+                console.error('Error details:', error.message);
+                if ('response' in error && error.response) {
+                  // @ts-ignore
+                  console.error('Response data:', error.response.data);
+                }
+              }
+              
+              throw new McpError(ErrorCode.InternalError, 
+                `Failed to create workflow: ${error instanceof Error ? error.message : String(error)}`);
+            }
             
           case 'get_workflow':
             if (!args.id) {
