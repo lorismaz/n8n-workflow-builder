@@ -2,7 +2,7 @@ import axios from 'axios';
 import { N8N_HOST, N8N_API_KEY, GITHUB_TOKEN } from '../config/constants';
 import { WorkflowSpec } from '../types/workflow';
 import { ExecutionListOptions } from '../types/execution';
-import { N8NWorkflowResponse, N8NExecutionResponse, N8NExecutionListResponse, NodeInfo, NodeListResponse } from '../types/api';
+import { N8NWorkflowResponse, N8NExecutionResponse, N8NExecutionListResponse, NodeInfo, NodeListResponse, NodeFileInfo } from '../types/api';
 
 const api = axios.create({
   baseURL: N8N_HOST,
@@ -107,7 +107,8 @@ export async function deleteWorkflow(id: string): Promise<any> {
 export async function activateWorkflow(id: string): Promise<N8NWorkflowResponse> {
   try {
     console.log(`Activating workflow with ID: ${id}`);
-    const response = await api.patch(`/workflows/${id}/activate`, {});
+    // Try POST method instead of PATCH
+    const response = await api.post(`/workflows/${id}/activate`, {});
     console.log('Response:', response.status, response.statusText);
     return response.data;
   } catch (error) {
@@ -118,7 +119,8 @@ export async function activateWorkflow(id: string): Promise<N8NWorkflowResponse>
 export async function deactivateWorkflow(id: string): Promise<N8NWorkflowResponse> {
   try {
     console.log(`Deactivating workflow with ID: ${id}`);
-    const response = await api.patch(`/workflows/${id}/deactivate`, {});
+    // Try POST method instead of PATCH
+    const response = await api.post(`/workflows/${id}/deactivate`, {});
     console.log('Response:', response.status, response.statusText);
     return response.data;
   } catch (error) {
@@ -225,9 +227,77 @@ export async function listNodeDirectories(): Promise<string[]> {
 }
 
 /**
- * Get information about an n8n node from GitHub
- * @param nodeName The name of the node directory
+ * Get file content from GitHub repository
+ * @param filePath Path to the file in the repository
+ * @returns The decoded file content
  */
+async function getFileContent(filePath: string): Promise<string> {
+  try {
+    const response = await githubApi.get(`/repos/n8n-io/n8n/contents/${filePath}`);
+    // File content is base64 encoded
+    const encodedContent = response.data.content;
+    return Buffer.from(encodedContent, 'base64').toString('utf-8');
+  } catch (error) {
+    console.warn(`Error fetching file content for ${filePath}:`, error);
+    return '';
+  }
+}
+
+/**
+ * List all files in a node directory
+ * @param nodeName The name of the node directory
+ * @returns Array of file information
+ */
+async function listNodeFiles(nodeName: string): Promise<NodeFileInfo[]> {
+  try {
+    const nodePath = `packages/nodes-base/nodes/${nodeName}`;
+    const response = await githubApi.get(`/repos/n8n-io/n8n/contents/${nodePath}`);
+    
+    // Map response to file info structure
+    const files: NodeFileInfo[] = response.data.map((item: any) => ({
+      name: item.name,
+      path: item.path,
+      type: item.type,
+      size: item.size
+    }));
+    
+    return files;
+  } catch (error) {
+    console.warn(`Error listing files for node ${nodeName}:`, error);
+    return [];
+  }
+}
+
+/**
+ * Get content of important files for a node
+ * @param files List of file information
+ * @returns Updated list with content for important files
+ */
+async function getImportantFileContents(files: NodeFileInfo[]): Promise<NodeFileInfo[]> {
+  // Define important file extensions to fetch content for
+  const importantExtensions = ['.js', '.ts', '.json', '.md', '.html', '.py'];
+  
+  // Clone the files array to avoid modifying the original during iteration
+  const filesWithContent = [...files];
+  
+  // Only fetch content for files with important extensions and smaller than 100KB
+  for (let i = 0; i < filesWithContent.length; i++) {
+    const file = filesWithContent[i];
+    
+    if (file.type === 'file' && 
+        importantExtensions.some(ext => file.name.endsWith(ext)) && 
+        file.size < 100000) { // 100KB limit to avoid large files
+      try {
+        file.content = await getFileContent(file.path);
+      } catch (error) {
+        console.warn(`Could not fetch content for ${file.path}`);
+      }
+    }
+  }
+  
+  return filesWithContent;
+}
+
 export async function getNodeInfo(nodeName: string): Promise<NodeInfo> {
   try {
     console.log(`Getting node info for ${nodeName}`);
@@ -235,21 +305,11 @@ export async function getNodeInfo(nodeName: string): Promise<NodeInfo> {
     // Path to the node's directory in the repository
     const nodePath = `packages/nodes-base/nodes/${nodeName}`;
     
-    // Get the readme content if available
-    let readmeContent: string | undefined;
-    let readmePath: string | undefined;
+    // Get all files in the node directory
+    const files = await listNodeFiles(nodeName);
     
-    try {
-      // Check for README.md file
-      const readmeResponse = await githubApi.get(`/repos/n8n-io/n8n/contents/${nodePath}/README.md`);
-      readmePath = readmeResponse.data.path;
-      
-      // Readme content is base64 encoded
-      const encodedContent = readmeResponse.data.content;
-      readmeContent = Buffer.from(encodedContent, 'base64').toString('utf-8');
-    } catch (error) {
-      console.warn(`No README.md found for node ${nodeName}`);
-    }
+    // Get content for important files
+    const filesWithContent = await getImportantFileContents(files);
     
     // Prepare node information
     const nodeInfo: NodeInfo = {
@@ -258,10 +318,9 @@ export async function getNodeInfo(nodeName: string): Promise<NodeInfo> {
         .replace(/-/g, ' ')
         .replace(/([A-Z])/g, ' $1')
         .replace(/^./, str => str.toUpperCase()),
-      description: extractDescriptionFromReadme(readmeContent) || `n8n node for ${nodeName}`,
+      description: `n8n node for ${nodeName}`,
       documentationUrl: `https://github.com/n8n-io/n8n/tree/master/${nodePath}`,
-      readmePath,
-      readmeContent
+      files: filesWithContent
     };
     
     return nodeInfo;
@@ -272,8 +331,9 @@ export async function getNodeInfo(nodeName: string): Promise<NodeInfo> {
 
 /**
  * List all available n8n nodes with basic information
+ * @param includeSampleFiles Whether to include a sample of important files for each node
  */
-export async function listNodes(): Promise<NodeListResponse> {
+export async function listNodes(includeSampleFiles: boolean = false): Promise<NodeListResponse> {
   try {
     console.log('Listing all n8n nodes from GitHub');
     
@@ -281,15 +341,31 @@ export async function listNodes(): Promise<NodeListResponse> {
     const nodeDirectories = await listNodeDirectories();
     
     // Basic node information without readme content to keep the response size manageable
-    const nodes: NodeInfo[] = nodeDirectories.map(dir => ({
-      name: dir,
-      displayName: dir
-        .replace(/-/g, ' ')
-        .replace(/([A-Z])/g, ' $1')
-        .replace(/^./, str => str.toUpperCase()),
-      description: `n8n node for ${dir}`,
-      documentationUrl: `https://github.com/n8n-io/n8n/tree/master/packages/nodes-base/nodes/${dir}`
-    }));
+    const nodes: NodeInfo[] = [];
+    
+    for (const dir of nodeDirectories) {
+      const nodeInfo: NodeInfo = {
+        name: dir,
+        displayName: dir
+          .replace(/-/g, ' ')
+          .replace(/([A-Z])/g, ' $1')
+          .replace(/^./, str => str.toUpperCase()),
+        description: `n8n node for ${dir}`,
+        documentationUrl: `https://github.com/n8n-io/n8n/tree/master/packages/nodes-base/nodes/${dir}`
+      };
+      
+      // If includeSampleFiles is true, fetch a limited set of files for this node
+      if (includeSampleFiles) {
+        // Get all files in the node directory
+        const files = await listNodeFiles(dir);
+        
+        // For the node listing, we'll just include metadata without contents
+        // to keep the response size manageable
+        nodeInfo.files = files;
+      }
+      
+      nodes.push(nodeInfo);
+    }
     
     return { nodes };
   } catch (error) {
@@ -297,27 +373,3 @@ export async function listNodes(): Promise<NodeListResponse> {
   }
 }
 
-/**
- * Helper function to extract a description from the README content
- */
-function extractDescriptionFromReadme(content?: string): string | undefined {
-  if (!content) return undefined;
-  
-  // Try to extract the first paragraph after the title
-  const lines = content.split('\n');
-  
-  // Skip the title and empty lines
-  let i = 0;
-  while (i < lines.length && (lines[i].startsWith('#') || lines[i].trim() === '')) {
-    i++;
-  }
-  
-  // Collect the first paragraph
-  let description = '';
-  while (i < lines.length && lines[i].trim() !== '') {
-    description += lines[i] + ' ';
-    i++;
-  }
-  
-  return description.trim();
-}

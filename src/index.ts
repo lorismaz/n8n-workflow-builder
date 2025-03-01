@@ -268,19 +268,9 @@ class N8NWorkflowServer {
         const nodeName = nodeMatch[1];
         
         try {
-          // Get detailed node information including readme
+          // Get detailed node information
           const nodeInfo = await n8nApi.getNodeInfo(nodeName);
           
-          // If readme content exists, convert markdown to HTML for better display
-          if (nodeInfo.readmeContent) {
-            try {
-              // Use marked.parse synchronously 
-              nodeInfo.readmeContent = marked.parse(nodeInfo.readmeContent) as string;
-            } catch (error) {
-              console.warn(`Error converting markdown to HTML for ${nodeName}:`, error);
-              // Keep original markdown if conversion fails
-            }
-          }
           
           return {
             contents: [{
@@ -568,7 +558,7 @@ class N8NWorkflowServer {
               nodesMap.set(nodeData.name, node);
             }
             
-            // Add connections between nodes
+            // Add connections to builder (we'll override the format later)
             if (args.connections && Array.isArray(args.connections)) {
               for (const conn of args.connections) {
                 const sourceNode = nodesMap.get(conn.source);
@@ -588,6 +578,39 @@ class N8NWorkflowServer {
             
             // Export the workflow specification
             const workflowSpec = builder.exportWorkflow();
+            
+            // Override connection format to match the correct n8n format
+            if (args.connections && Array.isArray(args.connections)) {
+              // Create a proper connections structure: { "NodeName": { "main": [ [{...}] ] } }
+              const connectionStructure: Record<string, any> = {};
+              
+              for (const conn of args.connections) {
+                if (!connectionStructure[conn.source]) {
+                  // Initialize the structure for this source node
+                  connectionStructure[conn.source] = {
+                    main: []
+                  };
+                }
+                
+                // Create arrays for each output index
+                const outputIndex = conn.sourceOutput || 0;
+                
+                // Make sure we have enough arrays for this output index
+                while (connectionStructure[conn.source].main.length <= outputIndex) {
+                  connectionStructure[conn.source].main.push([]);
+                }
+                
+                // Add this connection to the appropriate output index array
+                connectionStructure[conn.source].main[outputIndex].push({
+                  node: conn.target,
+                  type: 'main',
+                  index: conn.targetInput || 0
+                });
+              }
+              
+              // Replace the connections in the workflow spec
+              workflowSpec.connections = connectionStructure;
+            }
             
             console.log('Creating workflow with spec:', JSON.stringify(workflowSpec, null, 2));
             
@@ -746,16 +769,6 @@ class N8NWorkflowServer {
             
             const nodeInfo = await n8nApi.getNodeInfo(args.name);
             
-            // Convert markdown to HTML if readme content exists
-            if (nodeInfo.readmeContent) {
-              try {
-                // Use marked.parse synchronously
-                nodeInfo.readmeContent = marked.parse(nodeInfo.readmeContent) as string;
-              } catch (error) {
-                console.warn(`Error converting markdown to HTML for ${args.name}:`, error);
-                // Keep original markdown if conversion fails
-              }
-            }
             
             return {
               content: [{ 

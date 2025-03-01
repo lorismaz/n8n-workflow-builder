@@ -29,12 +29,12 @@ export interface NodeConnection {
   index: number; // Output index from source node
 }
 
-export interface ConnectionItem {
-  [sourceNodeName: string]: NodeConnection[];
+export interface NodeConnections {
+  main: NodeConnection[][][]; // Triple-nested array: [output_index][connection_group][connection]
 }
 
 export interface WorkflowConnections {
-  main?: ConnectionItem | NodeConnection[];
+  [sourceNodeName: string]: NodeConnections;
 }
 
 export interface WorkflowSettings {
@@ -51,7 +51,7 @@ export interface WorkflowSettings {
 export interface WorkflowSpec {
   name: string;
   nodes: WorkflowNode[];
-  connections: WorkflowConnections;
+  connections: WorkflowConnections | Record<string, any>; // Allow both our type and raw object
   settings?: WorkflowSettings;
   staticData?: Record<string, any>;
   // The following properties are read-only according to API errors

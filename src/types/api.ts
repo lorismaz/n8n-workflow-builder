@@ -45,6 +45,17 @@ export interface N8NErrorResponse {
 }
 
 /**
+ * File information from GitHub
+ */
+export interface NodeFileInfo {
+  name: string;
+  path: string;
+  type: string;
+  size: number;
+  content?: string;
+}
+
+/**
  * Node information structure from GitHub
  */
 export interface NodeInfo {
@@ -52,8 +63,7 @@ export interface NodeInfo {
   displayName: string;
   description: string;
   documentationUrl?: string;
-  readmePath?: string;
-  readmeContent?: string;
+  files?: NodeFileInfo[];
 }
 
 /**

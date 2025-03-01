@@ -3,7 +3,7 @@ import {
   WorkflowNode, 
   WorkflowConnections, 
   NodeConnection,
-  ConnectionItem,
+  NodeConnections,
   WorkflowSettings
 } from '../types/workflow';
 import { 
@@ -18,7 +18,7 @@ import { v4 as uuidv4 } from 'uuid';
  */
 export class WorkflowBuilder {
   private nodes: WorkflowNode[] = [];
-  private connections: WorkflowConnections = { main: {} };
+  private connections: Record<string, any> = {};
   private useDirectConnectionsArray: boolean = false; // Flag to use array instead of object for connections (deprecated - causing issues)
   private nextPosition = { ...DEFAULT_POSITION };
   private workflowName: string = 'New Workflow';
@@ -88,7 +88,7 @@ export class WorkflowBuilder {
   setConnectionFormat(useDirectArray: boolean): WorkflowBuilder {
     // Force object mapping format
     this.useDirectConnectionsArray = false;
-    this.connections = { main: {} };
+    this.connections = {}; // Will be built per node in the correct format
     
     console.warn("Array format for connections is not supported by n8n UI. Using object mapping format instead.");
     
@@ -268,21 +268,25 @@ export class WorkflowBuilder {
       index: outputIndex
     };
     
-    // Always use object mapping format as it's more compatible with n8n UI
-    // Initialize main connections if needed
-    if (!this.connections.main || Array.isArray(this.connections.main)) {
-      this.connections.main = {};
+    // Create the correct connection structure for n8n UI
+    // Format: { "NodeName": { "main": [ [{...connections}] ] } }
+    
+    // Initialize structure for this source node if needed
+    if (!this.connections[sourceNode.name]) {
+      this.connections[sourceNode.name] = {
+        main: [[]] // Initialize with one output port with empty connections
+      };
+    } else if (!this.connections[sourceNode.name].main) {
+      this.connections[sourceNode.name].main = [[]];
     }
     
-    const mainConnections = this.connections.main as ConnectionItem;
-    
-    // Initialize connections for this source node if needed
-    if (!mainConnections[sourceNode.name]) {
-      mainConnections[sourceNode.name] = [];
+    // Make sure we have enough arrays for the requested output index
+    while (this.connections[sourceNode.name].main.length <= outputIndex) {
+      this.connections[sourceNode.name].main.push([]);
     }
     
-    // Add the connection to the source node's connections array
-    mainConnections[sourceNode.name].push(connection);
+    // Add the connection to the proper output port
+    this.connections[sourceNode.name].main[outputIndex].push(connection);
     
     return this;
   }
@@ -313,7 +317,7 @@ export class WorkflowBuilder {
    */
   clear(): WorkflowBuilder {
     this.nodes = [];
-    this.connections = { main: {} };
+    this.connections = {}; // Empty object - connections will be built per node
     this.nextPosition = { ...DEFAULT_POSITION };
     return this;
   }
