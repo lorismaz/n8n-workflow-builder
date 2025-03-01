@@ -62,6 +62,12 @@ class N8NWorkflowServer {
             name: 'n8n Nodes',
             description: 'List of all available n8n nodes from GitHub',
             mimeType: 'application/json'
+          },
+          {
+            uri: '/n8n-base-url',
+            name: 'n8n Base URL',
+            description: 'The base URL of the n8n instance (useful for webhook URLs and workflow links)',
+            mimeType: 'text/plain'
           }
         ]
       };
@@ -121,6 +127,28 @@ class N8NWorkflowServer {
       console.log(`readResource handler invoked for URI: ${uri}`);
       
       // Static resources
+      if (uri === '/n8n-base-url') {
+        // Extract base URL from N8N_HOST
+        let baseUrl = '';
+        try {
+          if (n8nApi.N8N_HOST) {
+            const url = new URL(n8nApi.N8N_HOST);
+            baseUrl = `${url.protocol}//${url.host}`;
+          }
+        } catch (error) {
+          console.warn('Failed to extract base URL from N8N_HOST:', error);
+        }
+        
+        return {
+          contents: [{
+            type: 'text',
+            text: baseUrl,
+            mimeType: 'text/plain',
+            uri: '/n8n-base-url'
+          }]
+        };
+      }
+      
       if (uri === '/workflows') {
         const workflows = await n8nApi.listWorkflows();
         return {

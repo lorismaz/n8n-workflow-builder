@@ -210,6 +210,9 @@ export async function deleteExecution(id: number): Promise<N8NExecutionResponse>
 /**
  * List all available node directories from the n8n GitHub repository
  */
+// Export the N8N_HOST for use in other modules
+export { N8N_HOST };
+
 export async function listNodeDirectories(): Promise<string[]> {
   try {
     console.log('Listing node directories from GitHub');
